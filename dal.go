@@ -1,6 +1,7 @@
 package LibraDB
 
 import (
+	"fmt"
 	"os"
 )
 
@@ -17,4 +18,16 @@ func newDal(path string) (*dal, error) {
 	}
 	dal.file = file
 	return dal, nil
+}
+
+func (d *dal) close() error {
+	if d.file != nil {
+		err := d.file.Close()
+		if err != nil {
+			return fmt.Errorf("could not close file: %s", err)
+		}
+		d.file = nil
+	}
+
+	return nil
 }
