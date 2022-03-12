@@ -2,6 +2,10 @@ package LibraDB
 
 import "encoding/binary"
 
+const (
+	metaPageNum = 0
+)
+
 // meta is the meta page of the db
 type meta struct {
 	// The database has a root collection that holds all the collections in the database. It is called root and the
