@@ -5,7 +5,6 @@ import "encoding/binary"
 // metaPage is the maximum pgnum that is used by the db for its own purposes. For now, only page 0 is used as the
 // header page. It means all other page numbers can be used.
 const metaPage = 0
-const pageNumSize = 8
 
 // freelist manages the manages free and used pages.
 type freelist struct {
