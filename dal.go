@@ -15,6 +15,9 @@ type page struct {
 type dal struct {
 	file     *os.File
 	pageSize int
+
+	freelistPage pgnum
+	*freelist
 }
 
 func newDal(path string, pageSize int) (*dal, error) {
@@ -61,4 +64,28 @@ func (d *dal) writePage(p *page) error {
 	offset := int64(p.num) * int64(d.pageSize)
 	_, err := d.file.WriteAt(p.data, offset)
 	return err
+}
+
+func (d *dal) readFreelist() (*freelist, error) {
+	p, err := d.readPage(d.freelistPage)
+	if err != nil {
+		return nil, err
+	}
+
+	freelist := newFreelist()
+	freelist.deserialize(p.data)
+	return freelist, nil
+}
+
+func (d *dal) writeFreelist() (*page, error) {
+	p := d.allocateEmptyPage()
+	p.num = d.getNextPage()
+	p.data = d.freelist.serialize()
+
+	err := d.writePage(p)
+	if err != nil {
+		return nil, err
+	}
+	d.freelistPage = p.num
+	return p, nil
 }
