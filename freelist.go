@@ -1,8 +1,8 @@
 package LibraDB
 
-// initialPage is the maximum pgnum that is used by the db for its own purposes. For now, only page 0 is used as the
+// metaPage is the maximum pgnum that is used by the db for its own purposes. For now, only page 0 is used as the
 // header page. It means all other page numbers can be used.
-const initialPage = 0
+const metaPage = 0
 
 // freelist manages the manages free and used pages.
 type freelist struct {
@@ -15,7 +15,7 @@ type freelist struct {
 
 func newFreelist() *freelist {
 	return &freelist{
-		maxPage:       initialPage,
+		maxPage:       metaPage,
 		releasedPages: []pgnum{},
 	}
 }
@@ -36,4 +36,3 @@ func (fr *freelist) getNextPage() pgnum {
 func (fr *freelist) releasePage(page pgnum) {
 	fr.releasedPages = append(fr.releasedPages, page)
 }
-
