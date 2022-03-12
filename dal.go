@@ -16,7 +16,7 @@ type dal struct {
 	file     *os.File
 	pageSize int
 
-	freelistPage pgnum
+	*meta
 	*freelist
 }
 
