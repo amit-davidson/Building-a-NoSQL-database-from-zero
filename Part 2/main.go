@@ -13,5 +13,5 @@ func main() {
 
 	restartDal, _ := newDal("db.db")
 	newP, _ := restartDal.readPage(p.num)
-	fmt.Printf("res is: %s", newP.data[0:4])
+	fmt.Printf("res is: %s\n", newP.data[0:4])
 }
