@@ -83,7 +83,7 @@ func (d *dal) close() error {
 
 func (d *dal) allocateEmptyPage() *page {
 	return &page{
-		data: make([]byte, d.pageSize),
+		data: make([]byte, d.pageSize, d.pageSize),
 	}
 }
 
@@ -118,7 +118,7 @@ func (d *dal) readFreelist() (*freelist, error) {
 func (d *dal) writeFreelist() (*page, error) {
 	p := d.allocateEmptyPage()
 	p.num = d.getNextPage()
-	p.data = d.freelist.serialize()
+	d.freelist.serialize(p.data)
 
 	err := d.writePage(p)
 	if err != nil {
@@ -131,7 +131,7 @@ func (d *dal) writeFreelist() (*page, error) {
 func (d *dal) writeMeta(meta *meta) (*page, error) {
 	p := d.allocateEmptyPage()
 	p.num = metaPageNum
-	p.data = meta.serialize()
+	meta.serialize(p.data)
 
 	err := d.writePage(p)
 	if err != nil {
