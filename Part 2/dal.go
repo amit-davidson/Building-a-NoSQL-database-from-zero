@@ -1,4 +1,4 @@
-package Post_1
+package main
 
 import (
 	"errors"
@@ -23,7 +23,8 @@ type dal struct {
 
 func newDal(path string) (*dal, error) {
 	dal := &dal{
-		meta:           newEmptyMeta(),
+		meta:     newEmptyMeta(),
+		pageSize: os.Getpagesize(),
 	}
 
 	// exist

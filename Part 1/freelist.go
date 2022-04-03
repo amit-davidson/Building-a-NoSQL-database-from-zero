@@ -1,4 +1,4 @@
-package Post_1
+package main
 
 import "encoding/binary"
 
