@@ -12,6 +12,7 @@ func main() {
 	// commit it
 	_ = dal.writePage(p)
 	_, _ = dal.writeFreelist()
+
 	// Close the db
 	_ = dal.close()
 
