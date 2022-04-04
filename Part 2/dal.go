@@ -117,7 +117,11 @@ func (d *dal) readFreelist() (*freelist, error) {
 
 func (d *dal) writeFreelist() (*page, error) {
 	p := d.allocateEmptyPage()
-	p.num = d.getNextPage()
+	if d.freelistPage == 0 {
+		p.num = d.getNextPage()
+	} else {
+		p.num = d.freelistPage
+	}
 	d.freelist.serialize(p.data)
 
 	err := d.writePage(p)

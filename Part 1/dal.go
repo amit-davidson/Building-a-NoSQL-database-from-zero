@@ -20,14 +20,15 @@ type dal struct {
 }
 
 func newDal(path string, pageSize int) (*dal, error) {
-	dal := &dal{}
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return nil, err
 	}
-	dal.file = file
-	dal.pageSize = pageSize
-	dal.freelist = newFreelist()
+	dal := &dal{
+		file,
+		pageSize,
+		newFreelist(),
+	}
 	return dal, nil
 }
 
