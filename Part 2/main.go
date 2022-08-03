@@ -9,6 +9,10 @@ func main() {
 	p.num = dal.getNextPage()
 	copy(p.data[:], "data")
 
+	// Create a page and free it so the released pages will be updated
+	pageNum := dal.getNextPage()
+	dal.releasePage(pageNum)
+
 	// commit it
 	_ = dal.writePage(p)
 	_, _ = dal.writeFreelist()
