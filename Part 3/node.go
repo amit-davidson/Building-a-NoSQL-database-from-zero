@@ -11,6 +11,8 @@ type Item struct {
 }
 
 type Node struct {
+	*dal
+
 	pageNum    pgnum
 	items      []*Item
 	childNodes []pgnum
@@ -20,14 +22,6 @@ func NewEmptyNode() *Node {
 	return &Node{}
 }
 
-// NewNodeForSerialization creates a new node only with the properties that are relevant when saving to the disk
-func NewNodeForSerialization(items []*Item, childNodes []pgnum) *Node {
-	return &Node{
-		items:      items,
-		childNodes: childNodes,
-	}
-}
-
 func newItem(key []byte, value []byte) *Item {
 	return &Item{
 		key:   key,
@@ -35,36 +29,10 @@ func newItem(key []byte, value []byte) *Item {
 	}
 }
 
-func isLast(index int, parentNode *Node) bool {
-	return index == len(parentNode.items)
-}
-
-func isFirst(index int) bool {
-	return index == 0
-}
-
 func (n *Node) isLeaf() bool {
 	return len(n.childNodes) == 0
 }
 
-// isOverPopulated checks if the node size is bigger than the size of a page.
-func (n *Node) isOverPopulated() bool {
-	return n.tx.db.isOverPopulated(n)
-}
-
-// canSpareAnElement checks if the node size is big enough to populate a page after giving away one item.
-func (n *Node) canSpareAnElement() bool {
-	splitIndex := n.tx.db.getSplitIndex(n)
-	if splitIndex == -1 {
-		return false
-	}
-	return true
-}
-
-// isUnderPopulated checks if the node size is smaller than the size of a page.
-func (n *Node) isUnderPopulated() bool {
-	return n.tx.db.isUnderPopulated(n)
-}
 
 func (n *Node) serialize(buf []byte) []byte {
 	leftPos := 0
@@ -179,56 +147,36 @@ func (n *Node) deserialize(buf []byte) {
 	}
 }
 
-// elementSize returns the size of a key-value-childNode triplet at a given index. If the node is a leaf, then the size
-// of a key-value pair is returned. It's assumed i <= len(n.items)
-func (n *Node) elementSize(i int) int {
-	size := 0
-	size += len(n.items[i].key)
-	size += len(n.items[i].value)
-	size += pageNumSize // 8 is the pgnum size
-	return size
+
+// findKey searches for a key inside the tree. Once the key is found, the parent node and the correct index are returned
+// so the key itself can be accessed in the following way parent[index].
+// If the key isn't found, a falsey answer is returned.
+func (n *Node) findKey(key []byte) (int, *Node ,error) {
+	index, node, err := findKeyHelper(n, key)
+	if err != nil {
+		return -1, nil, err
+	}
+	return index, node, nil
 }
 
-// nodeSize returns the node's size in bytes
-func (n *Node) nodeSize() int {
-	size := 0
-	size += nodeHeaderSize
-
-	for i := range n.items {
-		size += n.elementSize(i)
+func findKeyHelper(node *Node, key []byte) (int, *Node ,error) {
+	// Search for the key inside the node
+	wasFound, index := node.findKeyInNode(key)
+	if wasFound {
+		return index, node, nil
 	}
 
-	// Add last page
-	size += pageNumSize // 8 is the pgnum size
-	return size
-}
-
-// findKey finds the node with the key, it's index in the parent's items and a list of its ancestors (not including the
-// node itself). The parent's items and key are used later for operations such as searching, adding and removing and
-// list of ancestors is used for rebalancing. It's also known as breadcrumbs.
-// When the item isn't found, if exact is true, then a falsey answer is returned. If exact is false, then the index
-// where the item should have been is returned (Used for insertion)
-func (n *Node) findKey(key []byte, exact bool) (int, *Node, []int ,error) {
-	node := n
-	// Find the path to the node where the deletion should happen
-	ancestorsIndexes := []int{0} // index of root
-	for true {
-		wasFound, index := node.findKeyInNode(key)
-		if wasFound {
-			return index, node, ancestorsIndexes, nil
-		} else {
-			if node.isLeaf() {
-				if exact {
-					return -1, nil, nil, nil
-				}
-				return index, node, ancestorsIndexes, nil
-			}
-			nextChild, _ := node.tx.getNode(node.childNodes[index])
-			ancestorsIndexes = append(ancestorsIndexes, index)
-			node = nextChild
-		}
+	// If we reached a leaf node and the key wasn't found, it means it doesn't exist.
+	if node.isLeaf() {
+		return -1, nil, nil
 	}
-	return -1, nil, nil, nil
+
+	// Else keep searching the tree
+	nextChild, err := node.dal.getNode(node.childNodes[index])
+	if err != nil {
+		return -1, nil, err
+	}
+	return findKeyHelper(nextChild, key)
 }
 
 // findKeyInNode iterates all the items and finds the key. If the key is found, then the item is returned. If the key
@@ -248,260 +196,4 @@ func (n *Node) findKeyInNode(key []byte) (bool, int) {
 
 	// The key isn't bigger than any of the items which means it's in the last index.
 	return false, len(n.items)
-}
-
-// setItem sets an item at the given index
-func (n *Node) setItem(item *Item, insertionIndex int) {
-	n.items[insertionIndex] = item
-}
-
-func (n *Node) addItem(item *Item, insertionIndex int) int {
-	if len(n.items) == insertionIndex { // nil or empty slice or after last element
-		n.items = append(n.items, item)
-		return insertionIndex
-	}
-
-	n.items = append(n.items[:insertionIndex+1], n.items[insertionIndex:]...)
-	n.items[insertionIndex] = item
-	return insertionIndex
-}
-
-// addChild adds a child at a given position. If the child is in the end, then the list is appended. Otherwise, the list
-// is shifted and the child is inserted.
-func (n *Node) addChild(node *Node, insertionIndex int) {
-	if len(n.childNodes) == insertionIndex { // nil or empty slice or after last element
-		n.childNodes = append(n.childNodes, node.pageNum)
-	}
-
-	n.childNodes = append(n.childNodes[:insertionIndex+1], n.childNodes[insertionIndex:]...)
-	n.childNodes[insertionIndex] = node.pageNum
-}
-
-// split rebalances the tree after adding. After insertion the modified node has to be checked to make sure it
-// didn't exceed the maximum number of elements. If it did, then it has to be split and rebalanced. The transformation
-// is depicted in the graph below. If it's not a leaf node, then the children has to be moved as well as shown.
-// This may leave the parent unbalanced by having too many items so rebalancing has to be checked for all the ancestors.
-// The split is performed in a for loop to support splitting a node more than once. (Though in practice used only once).
-// 	           n                                        n
-//                 3                                       3,6
-//	      /        \           ------>       /          |          \
-//	   a           modifiedNode            a       modifiedNode     c
-//   1,2                 4,5,6,7,8            1,2          4,5         7,8
-func (n *Node) split(modifiedNode *Node, insertionIndex int) {
-	i := 0
-
-	for modifiedNode.isOverPopulated() {
-		// The first index where min amount of bytes to populate a page is achieved. Then add 1 so it will be split one
-		// index after.
-		splitIndex := modifiedNode.tx.db.getSplitIndex(modifiedNode)
-
-		middleItem := modifiedNode.items[splitIndex]
-		var newNode *Node
-
-		if modifiedNode.isLeaf() {
-			newNode = n.tx.writeNode(n.tx.newNode(modifiedNode.items[splitIndex+1:], []pgnum{}))
-			modifiedNode.items = modifiedNode.items[:splitIndex]
-		} else {
-			newNode = n.tx.writeNode(n.tx.newNode(modifiedNode.items[splitIndex+1:], modifiedNode.childNodes[i+1:]))
-			modifiedNode.items = modifiedNode.items[:splitIndex]
-			modifiedNode.childNodes = modifiedNode.childNodes[:splitIndex+1]
-		}
-		n.addItem(middleItem, insertionIndex)
-		if len(n.childNodes) == insertionIndex+1 { // If middle of list, then move items forward
-			n.childNodes = append(n.childNodes, newNode.pageNum)
-		} else {
-			n.childNodes = append(n.childNodes[:insertionIndex+1], n.childNodes[insertionIndex:]...)
-			n.childNodes[insertionIndex+1] = newNode.pageNum
-		}
-
-		n.tx.writeNodes(n, modifiedNode)
-
-		insertionIndex += 1
-		i += 1
-		modifiedNode = newNode
-	}
-}
-
-// rebalanceRemove rebalances the tree after a remove operation. This can be either by rotating to the right, to the
-// left or by merging. Firstly, the sibling nodes are checked to see if they have enough items for rebalancing
-// (>= minItems+1). If they don't have enough items, then merging with one of the sibling nodes occurs. This may leave
-// the parent unbalanced by having too little items so rebalancing has to be checked for all the ancestors.
-func (n *Node) rebalanceRemove(unbalancedNode *Node, unbalancedNodeIndex int) error {
-	pNode := n
-
-	// Right rotate
-	if unbalancedNodeIndex != 0 {
-		leftNode, err := n.tx.getNode(pNode.childNodes[unbalancedNodeIndex-1])
-		if err != nil {
-			return err
-		}
-		if leftNode.canSpareAnElement() {
-			rotateRight(leftNode, pNode, unbalancedNode, unbalancedNodeIndex)
-			n.tx.writeNodes(leftNode, pNode, unbalancedNode)
-			return nil
-		}
-	}
-
-	// Left Balance
-	if unbalancedNodeIndex != len(pNode.childNodes)-1 {
-		rightNode, err := n.tx.getNode(pNode.childNodes[unbalancedNodeIndex+1])
-		if err != nil {
-			return err
-		}
-		if rightNode.canSpareAnElement() {
-			rotateLeft(unbalancedNode, pNode, rightNode, unbalancedNodeIndex)
-			n.tx.writeNodes(unbalancedNode, pNode, rightNode)
-			return nil
-		}
-	}
-
-	return pNode.merge(unbalancedNode, unbalancedNodeIndex)
-}
-
-// removeItemFromLeaf removes an item from a leaf node. It means there is no handling of child nodes.
-func (n *Node) removeItemFromLeaf(index int) {
-	n.items = append(n.items[:index], n.items[index+1:]...)
-	n.tx.writeNode(n)
-}
-
-func (n *Node) removeItemFromInternal(index int) ([]int, error) {
-	// Take element before inorder (The biggest element from the left branch), put it in the removed index and remove
-	// it from the original node.
-	//          p
-	//       /
-	//     ..
-	//  /     \
-	// ..      a
-
-	affectedNodes := make([]int, 0)
-	affectedNodes = append(affectedNodes, index)
-
-	aNode, _ := n.tx.getNode(n.childNodes[index])
-	for !aNode.isLeaf() {
-		traversingIndex := len(n.childNodes) - 1
-		aNode, _ = n.tx.getNode(n.childNodes[traversingIndex])
-		affectedNodes = append(affectedNodes, traversingIndex)
-	}
-
-	n.items[index] = aNode.items[len(aNode.items)-1]
-	aNode.items = aNode.items[:len(aNode.items)-1]
-	n.tx.writeNodes(n, aNode)
-
-	return affectedNodes, nil
-}
-
-func rotateRight(aNode, pNode, bNode *Node, bNodeIndex int) {
-	// 	           p                                    p
-	//                 4                                    3
-	//	      /        \           ------>         /          \
-	//	   a           b (unbalanced)            a        b (unbalanced)
-	//      1,2,3             5                     1,2            4,5
-
-	// Get last item and remove it
-	aNodeItem := aNode.items[len(aNode.items)-1]
-	aNode.items = aNode.items[:len(aNode.items)-1]
-
-	// Get item from parent node and assign the aNodeItem item instead
-	pNodeItemIndex := bNodeIndex - 1
-	if isFirst(bNodeIndex) {
-		pNodeItemIndex = 0
-	}
-	pNodeItem := pNode.items[pNodeItemIndex]
-	pNode.items[pNodeItemIndex] = aNodeItem
-
-	// Assign parent item to b and make it first
-	bNode.items = append([]*Item{pNodeItem}, bNode.items...)
-
-	// If it's an inner leaf then move children as well.
-	if !aNode.isLeaf() {
-		childNodeToShift := aNode.childNodes[len(aNode.childNodes)-1]
-		aNode.childNodes = aNode.childNodes[:len(aNode.childNodes)-1]
-		bNode.childNodes = append([]pgnum{childNodeToShift}, bNode.childNodes...)
-	}
-}
-
-func rotateLeft(aNode, pNode, bNode *Node, bNodeIndex int) {
-	// 	           p                                     p
-	//                 2                                     3
-	//	      /        \           ------>         /          \
-	//  a(unbalanced)       b                 a(unbalanced)        b
-	//   1                3,4,5                   1,2             4,5
-
-	// Get first item and remove it
-	bNodeItem := bNode.items[0]
-	bNode.items = bNode.items[1:]
-
-	// Get item from parent node and assign the bNodeItem item instead
-	pNodeItemIndex := bNodeIndex
-	if isLast(bNodeIndex, pNode) {
-		pNodeItemIndex = len(pNode.items) - 1
-	}
-	pNodeItem := pNode.items[pNodeItemIndex]
-	pNode.items[pNodeItemIndex] = bNodeItem
-
-	// Assign parent item to a and make it last
-	aNode.items = append(aNode.items, pNodeItem)
-
-	// If it's an inner leaf then move children as well.
-	if !bNode.isLeaf() {
-		childNodeToShift := bNode.childNodes[0]
-		bNode.childNodes = bNode.childNodes[1:]
-		aNode.childNodes = append(aNode.childNodes, childNodeToShift)
-	}
-}
-
-func (n *Node) merge(unbalancedNode *Node, unbalancedNodeIndex int) error {
-	var aNode, bNode *Node
-	var err error
-	if unbalancedNodeIndex == 0 {
-		// 	               p                                     p
-		//                2,5                                    5
-		//	      /        |       \       ------>         /          \
-		//  a(unbalanced)   b         c                   a            c
-		//   1             3,4          6,7              1,2,3,4        6,7
-		aNode = unbalancedNode
-		bNode, err = n.tx.getNode(n.childNodes[unbalancedNodeIndex+1])
-		if err != nil {
-			return err
-		}
-
-		// Take the item from the parent, remove it and add it to the unbalanced node
-		pNodeItem := n.items[0]
-		n.items = n.items[1:]
-		aNode.items = append(aNode.items, pNodeItem)
-
-		//merge the bNode to aNode and remove it. Handle its child nodes as well.
-		aNode.items = append(aNode.items, bNode.items...)
-		n.childNodes = append(n.childNodes[0:1], n.childNodes[2:]...)
-		if !bNode.isLeaf() {
-			aNode.childNodes = append(aNode.childNodes, bNode.childNodes...)
-		}
-	} else {
-		// 	               p                                     p
-		//                3,5                                    5
-		//	      /        |       \       ------>         /          \
-		//       a   b(unbalanced)   c                    a            c
-		//     1,2         4        6,7                 1,2,3,4         6,7
-		aNode, err = n.tx.getNode(n.childNodes[unbalancedNodeIndex-1])
-		if err != nil {
-			return err
-		}
-
-		bNode = unbalancedNode
-
-		// Take the item from the parent, remove it and add it to the unbalanced node
-		pNodeItem := n.items[unbalancedNodeIndex-1]
-		n.items = append(n.items[:unbalancedNodeIndex-1], n.items[unbalancedNodeIndex:]...)
-		aNode.items = append(aNode.items, pNodeItem)
-
-		aNode.items = append(aNode.items, bNode.items...)
-		n.childNodes = append(n.childNodes[:unbalancedNodeIndex], n.childNodes[unbalancedNodeIndex+1:]...)
-		if !aNode.isLeaf() {
-			bNode.childNodes = append(aNode.childNodes, bNode.childNodes...)
-		}
-	}
-	n.tx.writeNodes(aNode, n)
-	n.tx.deleteNode(bNode)
-	return nil
-
 }
