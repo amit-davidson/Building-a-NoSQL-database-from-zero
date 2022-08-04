@@ -92,6 +92,38 @@ func newDal(path string, options *Options) (*dal, error) {
 	return dal, nil
 }
 
+// getSplitIndex should be called when performing rebalance after an item is removed. It checks if a node can spare an
+// element, and if it does then it returns the index when there the split should happen. Otherwise -1 is returned.
+func (d *dal) getSplitIndex(node *Node) int {
+	size := 0
+	size += nodeHeaderSize
+
+	for i := range node.items {
+		size += node.elementSize(i)
+
+		// if we have a big enough page size (more than minimum), and didn't reach the last node, which means we can
+		// spare an element
+		if float32(size) > d.minThreshold() && i < len(node.items) - 1 {
+			return i + 1
+		}
+	}
+
+	return -1
+}
+
+
+func (d *dal) isOverPopulated(node *Node) bool {
+	return float32(node.nodeSize()) > d.maxFillPercent*float32(d.pageSize)
+}
+
+func (d *dal) minThreshold() float32 {
+	return d.minFillPercent * float32(d.pageSize)
+}
+
+func (d *dal) isUnderPopulated(node *Node) bool {
+	return float32(node.nodeSize()) < d.minThreshold()
+}
+
 func (d *dal) close() error {
 	if d.file != nil {
 		err := d.file.Close()
@@ -110,6 +142,32 @@ func (d *dal) allocateEmptyPage() *page {
 	}
 }
 
+func (d *dal) readPage(pageNum pgnum) (*page, error) {
+	p := d.allocateEmptyPage()
+
+	offset := int(pageNum) * d.pageSize
+	_, err := d.file.ReadAt(p.data, int64(offset))
+	if err != nil {
+		return nil, err
+	}
+	return p, err
+}
+
+func (d *dal) writePage(p *page) error {
+	offset := int64(p.num) * int64(d.pageSize)
+	_, err := d.file.WriteAt(p.data, offset)
+	return err
+}
+
+func (d *dal) newNode(items []*Item, childNodes []pgnum) *Node {
+	node := NewEmptyNode()
+	node.items = items
+	node.childNodes = childNodes
+	node.pageNum = d.getNextPage()
+	node.dal = d
+	return node
+}
+
 func (d *dal) getNode(pageNum pgnum) (*Node, error) {
 	p, err := d.readPage(pageNum)
 	if err != nil {
@@ -118,6 +176,7 @@ func (d *dal) getNode(pageNum pgnum) (*Node, error) {
 	node := NewEmptyNode()
 	node.deserialize(p.data)
 	node.pageNum = pageNum
+	node.dal=d
 	return node, nil
 }
 
@@ -141,23 +200,6 @@ func (d *dal) writeNode(n *Node) (*Node, error) {
 
 func (d *dal) deleteNode(pageNum pgnum) {
 	d.releasePage(pageNum)
-}
-
-func (d *dal) readPage(pageNum pgnum) (*page, error) {
-	p := d.allocateEmptyPage()
-
-	offset := int(pageNum) * d.pageSize
-	_, err := d.file.ReadAt(p.data, int64(offset))
-	if err != nil {
-		return nil, err
-	}
-	return p, err
-}
-
-func (d *dal) writePage(p *page) error {
-	offset := int64(p.num) * int64(d.pageSize)
-	_, err := d.file.WriteAt(p.data, offset)
-	return err
 }
 
 func (d *dal) readFreelist() (*freelist, error) {
