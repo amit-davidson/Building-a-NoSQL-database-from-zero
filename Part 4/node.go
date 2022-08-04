@@ -22,6 +22,14 @@ func NewEmptyNode() *Node {
 	return &Node{}
 }
 
+// NewNodeForSerialization creates a new node only with the properties that are relevant when saving to the disk
+func NewNodeForSerialization(items []*Item, childNodes []pgnum) *Node {
+	return &Node{
+		items:      items,
+		childNodes: childNodes,
+	}
+}
+
 func newItem(key []byte, value []byte) *Item {
 	return &Item{
 		key:   key,

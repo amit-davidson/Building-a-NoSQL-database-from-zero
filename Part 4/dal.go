@@ -8,23 +8,39 @@ import (
 
 type pgnum uint64
 
+type Options struct {
+	pageSize int
+
+	MinFillPercent float32
+	MaxFillPercent float32
+}
+
+var DefaultOptions = &Options{
+	MinFillPercent: 0.5,
+	MaxFillPercent: 0.95,
+}
+
 type page struct {
 	num  pgnum
 	data []byte
 }
 
 type dal struct {
-	file     *os.File
-	pageSize int
+	pageSize       int
+	minFillPercent float32
+	maxFillPercent float32
+	file *os.File
 
 	*meta
 	*freelist
 }
 
-func newDal(path string) (*dal, error) {
+func newDal(path string, options *Options) (*dal, error) {
 	dal := &dal{
-		meta:     newEmptyMeta(),
-		pageSize: os.Getpagesize(),
+		meta:           newEmptyMeta(),
+		pageSize:       options.pageSize,
+		minFillPercent: options.MinFillPercent,
+		maxFillPercent: options.MaxFillPercent,
 	}
 
 	// exist
@@ -60,6 +76,13 @@ func newDal(path string) (*dal, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// init root
+		collectionsNode, err := dal.writeNode(NewNodeForSerialization([]*Item{}, []pgnum{}))
+		if err != nil {
+			return nil, err
+		}
+		dal.root = collectionsNode.pageNum
 
 		// write meta page
 		_, err = dal.writeMeta(dal.meta) // other error
@@ -150,11 +173,7 @@ func (d *dal) readFreelist() (*freelist, error) {
 
 func (d *dal) writeFreelist() (*page, error) {
 	p := d.allocateEmptyPage()
-	if d.freelistPage == 0 {
-		p.num = d.getNextPage()
-	} else {
-		p.num = d.freelistPage
-	}
+	p.num = d.getNextPage()
 	d.freelist.serialize(p.data)
 
 	err := d.writePage(p)
