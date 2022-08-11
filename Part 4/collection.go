@@ -1,5 +1,7 @@
 package main
 
+import "bytes"
+
 type Collection struct {
 	name []byte
 	root pgnum
@@ -37,8 +39,8 @@ func (c *Collection) Put(key []byte, value []byte) error {
 		return err
 	}
 
-	if insertionIndex == -1 {
-		// Set in place
+	// If key already exists
+	if nodeToInsertIn.items != nil && bytes.Compare(nodeToInsertIn.items[insertionIndex].key, key) == 0 {
 		nodeToInsertIn.items[insertionIndex] = i
 	} else {
 		// Add item to the leaf node
