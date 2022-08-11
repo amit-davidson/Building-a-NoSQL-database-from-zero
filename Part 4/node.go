@@ -285,7 +285,7 @@ func (n *Node) addItem(item *Item, insertionIndex int) int {
 func (n *Node) split(nodeToSplit *Node, nodeToSplitIndex int) {
 	// The first index where min amount of bytes to populate a page is achieved. Then add 1 so it will be split one
 	// index after.
-	splitIndex := nodeToSplit.tx.db.getSplitIndex(nodeToSplit)
+	splitIndex := nodeToSplit.dal.getSplitIndex(nodeToSplit)
 
 	middleItem := nodeToSplit.items[splitIndex]
 	var newNode *Node
