@@ -43,7 +43,6 @@ func (c *Collection) Put(key []byte, value []byte) error {
 	} else {
 		// Add item to the leaf node
 		nodeToInsertIn.addItem(i, insertionIndex)
-
 	}
 	_, err  = c.dal.writeNode(nodeToInsertIn)
 	if err != nil {
