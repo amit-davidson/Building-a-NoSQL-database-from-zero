@@ -4,9 +4,7 @@ type Collection struct {
 	name []byte
 	root pgnum
 
-	// associated transaction
 	dal *dal
-
 }
 
 // Put adds a key to the tree. It finds the correct node and the insertion index and adds the item. When performing the
