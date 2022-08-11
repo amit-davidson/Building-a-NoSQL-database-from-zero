@@ -1,7 +1,5 @@
 package main
 
-import "encoding/binary"
-
 type Collection struct {
 	name []byte
 	root pgnum
@@ -10,46 +8,6 @@ type Collection struct {
 	// associated transaction
 	dal *dal
 
-}
-
-func newCollection(name []byte, root pgnum) *Collection {
-	return &Collection{
-		name: name,
-		root: root,
-	}
-}
-
-func newEmptyCollection() *Collection {
-	return &Collection{}
-}
-
-func (c *Collection) ID() uint64 {
-	id := c.counter
-	c.counter += 1
-	return id
-}
-
-func (c *Collection) serialize() *Item {
-	b := make([]byte, collectionSize)
-	leftPos := 0
-	binary.LittleEndian.PutUint64(b[leftPos:], uint64(c.root))
-	leftPos += pageNumSize
-	binary.LittleEndian.PutUint64(b[leftPos:], c.counter)
-	leftPos += counterSize
-	return newItem(c.name, b)
-}
-
-func (c *Collection) deserialize(item *Item) {
-	c.name = item.key
-
-	if len(item.value) != 0 {
-		leftPos := 0
-		c.root = pgnum(binary.LittleEndian.Uint64(item.value[leftPos:]))
-		leftPos += pageNumSize
-
-		c.counter = binary.LittleEndian.Uint64(item.value[leftPos:])
-		leftPos += counterSize
-	}
 }
 
 // Put adds a key to the tree. It finds the correct node and the insertion index and adds the item. When performing the
