@@ -112,8 +112,12 @@ func (d *dal) getSplitIndex(node *Node) int {
 }
 
 
+func (d *dal) maxThreshold() float32 {
+	return d.maxFillPercent * float32(d.pageSize)
+}
+
 func (d *dal) isOverPopulated(node *Node) bool {
-	return float32(node.nodeSize()) > d.maxFillPercent*float32(d.pageSize)
+	return float32(node.nodeSize()) > d.maxThreshold()
 }
 
 func (d *dal) minThreshold() float32 {
