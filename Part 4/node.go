@@ -181,8 +181,9 @@ func (n *Node) deserialize(buf []byte) {
 	}
 }
 
-// elementSize returns the size of a key-value-childNode triplet at a given index. If the node is a leaf, then the size
-// of a key-value pair is returned. It's assumed i <= len(n.items)
+// elementSize returns the size of a key-value-childNode triplet at a given index.
+// If the node is a leaf, then the size of a key-value pair is returned.
+// It's assumed i <= len(n.items)
 func (n *Node) elementSize(i int) int {
 	size := 0
 	size += len(n.items[i].key)
