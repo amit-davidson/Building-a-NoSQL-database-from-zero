@@ -3,7 +3,6 @@ package main
 type Collection struct {
 	name []byte
 	root pgnum
-	counter uint64
 
 	// associated transaction
 	dal *dal
