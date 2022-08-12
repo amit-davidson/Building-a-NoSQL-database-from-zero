@@ -9,6 +9,13 @@ type Collection struct {
 	dal *dal
 }
 
+func newCollection(name []byte, root pgnum) *Collection {
+	return &Collection{
+		name: name,
+		root: root,
+	}
+}
+
 // Put adds a key to the tree. It finds the correct node and the insertion index and adds the item. When performing the
 // search, the ancestors are returned as well. This way we can iterate over them to check which nodes were modified and
 // rebalance by splitting them accordingly. If the root has too many items, then a new root of a new layer is
