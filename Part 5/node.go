@@ -309,3 +309,198 @@ func (n *Node) split(nodeToSplit *Node, nodeToSplitIndex int) {
 	newNode, _ = n.dal.writeNode(n)
 	newNode, _ = n.dal.writeNode(nodeToSplit)
 }
+
+// rebalanceRemove rebalances the tree after a remove operation. This can be either by rotating to the right, to the
+// left or by merging. Firstly, the sibling nodes are checked to see if they have enough items for rebalancing
+// (>= minItems+1). If they don't have enough items, then merging with one of the sibling nodes occurs. This may leave
+// the parent unbalanced by having too little items so rebalancing has to be checked for all the ancestors.
+func (n *Node) rebalanceRemove(unbalancedNode *Node, unbalancedNodeIndex int) error {
+	pNode := n
+
+	// Right rotate
+	if unbalancedNodeIndex != 0 {
+		leftNode, err := n.dal.getNode(pNode.childNodes[unbalancedNodeIndex-1])
+		if err != nil {
+			return err
+		}
+		if leftNode.canSpareAnElement() {
+			rotateRight(leftNode, pNode, unbalancedNode, unbalancedNodeIndex)
+			_, _ = n.dal.writeNode(leftNode)
+			_, _ = n.dal.writeNode(pNode)
+			_, _ = n.dal.writeNode(unbalancedNode)
+			return nil
+		}
+	}
+
+	// Left Balance
+	if unbalancedNodeIndex != len(pNode.childNodes)-1 {
+		rightNode, err := n.dal.getNode(pNode.childNodes[unbalancedNodeIndex+1])
+		if err != nil {
+			return err
+		}
+		if rightNode.canSpareAnElement() {
+			rotateLeft(unbalancedNode, pNode, rightNode, unbalancedNodeIndex)
+			_, _ = n.dal.writeNode(unbalancedNode)
+			_, _ = n.dal.writeNode(pNode)
+			_, _ = n.dal.writeNode(rightNode)
+			return nil
+		}
+	}
+
+	return pNode.merge(unbalancedNode, unbalancedNodeIndex)
+}
+
+// removeItemFromLeaf removes an item from a leaf node. It means there is no handling of child nodes.
+func (n *Node) removeItemFromLeaf(index int) {
+	n.items = append(n.items[:index], n.items[index+1:]...)
+	n.dal.writeNode(n)
+}
+
+func (n *Node) removeItemFromInternal(index int) ([]int, error) {
+	// Take element before inorder (The biggest element from the left branch), put it in the removed index and remove
+	// it from the original node.
+	//          p
+	//       /
+	//     ..
+	//  /     \
+	// ..      a
+
+	affectedNodes := make([]int, 0)
+	affectedNodes = append(affectedNodes, index)
+
+	aNode, _ := n.dal.getNode(n.childNodes[index])
+	for !aNode.isLeaf() {
+		traversingIndex := len(n.childNodes) - 1
+		aNode, _ = n.dal.getNode(n.childNodes[traversingIndex])
+		affectedNodes = append(affectedNodes, traversingIndex)
+	}
+
+	n.items[index] = aNode.items[len(aNode.items)-1]
+	aNode.items = aNode.items[:len(aNode.items)-1]
+	_, _ = n.dal.writeNode(n)
+	_, _ = n.dal.writeNode(aNode)
+
+	return affectedNodes, nil
+}
+
+func rotateRight(aNode, pNode, bNode *Node, bNodeIndex int) {
+	// 	           p                                    p
+	//                 4                                    3
+	//	      /        \           ------>         /          \
+	//	   a           b (unbalanced)            a        b (unbalanced)
+	//      1,2,3             5                     1,2            4,5
+
+	// Get last item and remove it
+	aNodeItem := aNode.items[len(aNode.items)-1]
+	aNode.items = aNode.items[:len(aNode.items)-1]
+
+	// Get item from parent node and assign the aNodeItem item instead
+	pNodeItemIndex := bNodeIndex - 1
+	if isFirst(bNodeIndex) {
+		pNodeItemIndex = 0
+	}
+	pNodeItem := pNode.items[pNodeItemIndex]
+	pNode.items[pNodeItemIndex] = aNodeItem
+
+	// Assign parent item to b and make it first
+	bNode.items = append([]*Item{pNodeItem}, bNode.items...)
+
+	// If it's an inner leaf then move children as well.
+	if !aNode.isLeaf() {
+		childNodeToShift := aNode.childNodes[len(aNode.childNodes)-1]
+		aNode.childNodes = aNode.childNodes[:len(aNode.childNodes)-1]
+		bNode.childNodes = append([]pgnum{childNodeToShift}, bNode.childNodes...)
+	}
+}
+
+func rotateLeft(aNode, pNode, bNode *Node, bNodeIndex int) {
+	// 	           p                                     p
+	//                 2                                     3
+	//	      /        \           ------>         /          \
+	//  a(unbalanced)       b                 a(unbalanced)        b
+	//   1                3,4,5                   1,2             4,5
+
+	// Get first item and remove it
+	bNodeItem := bNode.items[0]
+	bNode.items = bNode.items[1:]
+
+	// Get item from parent node and assign the bNodeItem item instead
+	pNodeItemIndex := bNodeIndex
+	if isLast(bNodeIndex, pNode) {
+		pNodeItemIndex = len(pNode.items) - 1
+	}
+	pNodeItem := pNode.items[pNodeItemIndex]
+	pNode.items[pNodeItemIndex] = bNodeItem
+
+	// Assign parent item to a and make it last
+	aNode.items = append(aNode.items, pNodeItem)
+
+	// If it's an inner leaf then move children as well.
+	if !bNode.isLeaf() {
+		childNodeToShift := bNode.childNodes[0]
+		bNode.childNodes = bNode.childNodes[1:]
+		aNode.childNodes = append(aNode.childNodes, childNodeToShift)
+	}
+}
+
+func (n *Node) merge(unbalancedNode *Node, unbalancedNodeIndex int) error {
+	var aNode, bNode *Node
+	var err error
+	if unbalancedNodeIndex == 0 {
+		// 	               p                                     p
+		//                2,5                                    5
+		//	      /        |       \       ------>         /          \
+		//  a(unbalanced)   b         c                   a            c
+		//   1             3,4          6,7              1,2,3,4        6,7
+		aNode = unbalancedNode
+		bNode, err = n.dal.getNode(n.childNodes[unbalancedNodeIndex+1])
+		if err != nil {
+			return err
+		}
+
+		// Take the item from the parent, remove it and add it to the unbalanced node
+		pNodeItem := n.items[0]
+		n.items = n.items[1:]
+		aNode.items = append(aNode.items, pNodeItem)
+
+		//merge the bNode to aNode and remove it. Handle its child nodes as well.
+		aNode.items = append(aNode.items, bNode.items...)
+		n.childNodes = append(n.childNodes[0:1], n.childNodes[2:]...)
+		if !bNode.isLeaf() {
+			aNode.childNodes = append(aNode.childNodes, bNode.childNodes...)
+		}
+	} else {
+		// 	               p                                     p
+		//                3,5                                    5
+		//	      /        |       \       ------>         /          \
+		//       a   b(unbalanced)   c                    a            c
+		//     1,2         4        6,7                 1,2,3,4         6,7
+		aNode, err = n.dal.getNode(n.childNodes[unbalancedNodeIndex-1])
+		if err != nil {
+			return err
+		}
+
+		bNode = unbalancedNode
+
+		// Take the item from the parent, remove it and add it to the unbalanced node
+		pNodeItem := n.items[unbalancedNodeIndex-1]
+		n.items = append(n.items[:unbalancedNodeIndex-1], n.items[unbalancedNodeIndex:]...)
+		aNode.items = append(aNode.items, pNodeItem)
+
+		aNode.items = append(aNode.items, bNode.items...)
+		n.childNodes = append(n.childNodes[:unbalancedNodeIndex], n.childNodes[unbalancedNodeIndex+1:]...)
+		if !aNode.isLeaf() {
+			bNode.childNodes = append(aNode.childNodes, bNode.childNodes...)
+		}
+	}
+	_, err = n.dal.writeNode(aNode)
+	if err != nil {
+		return err
+	}
+	_, err = n.dal.writeNode(n)
+	if err != nil {
+		return err
+	}
+	n.dal.deleteNode(bNode.pageNum)
+	return nil
+}

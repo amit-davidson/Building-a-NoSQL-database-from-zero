@@ -108,6 +108,63 @@ func (c *Collection) Find(key []byte) (*Item, error) {
 	return containingNode.items[index], nil
 }
 
+// Remove removes a key from the tree. It finds the correct node and the index to remove the item from and removes it.
+// When performing the search, the ancestors are returned as well. This way we can iterate over them to check which
+// nodes were modified and rebalance by rotating or merging the unbalanced nodes. Rotation is done first. If the
+// siblings don't have enough items, then merging occurs. If the root is without items after a split, then the root is
+// removed and the tree is one level shorter.
+func (c *Collection) Remove(key []byte) error {
+	// Find the path to the node where the deletion should happen
+	rootNode, err := c.dal.getNode(c.root)
+	if err != nil {
+		return err
+	}
+
+	removeItemIndex, nodeToRemoveFrom, ancestorsIndexes, err := rootNode.findKey(key, true)
+	if err != nil {
+		return err
+	}
+
+	if removeItemIndex == -1 {
+		return nil
+	}
+
+	if nodeToRemoveFrom.isLeaf() {
+		nodeToRemoveFrom.removeItemFromLeaf(removeItemIndex)
+	} else {
+		affectedNodes, err := nodeToRemoveFrom.removeItemFromInternal(removeItemIndex)
+		if err != nil {
+			return err
+		}
+		ancestorsIndexes = append(ancestorsIndexes, affectedNodes...)
+	}
+
+	ancestors, err := c.getNodes(ancestorsIndexes)
+	if err != nil {
+		return err
+	}
+
+	// Rebalance the nodes all the way up. Start From one node before the last and go all the way up. Exclude root.
+	for i := len(ancestors) - 2; i >= 0; i-- {
+		pnode := ancestors[i]
+		node := ancestors[i+1]
+		if node.isUnderPopulated() {
+			err = pnode.rebalanceRemove(node, ancestorsIndexes[i+1])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	rootNode = ancestors[0]
+	// If the root has no items after rebalancing, there's no need to save it because we ignore it.
+	if len(rootNode.items) == 0 && len(rootNode.childNodes) > 0 {
+		c.root = ancestors[1].pageNum
+	}
+
+	return nil
+}
+
 // getNodes returns a list of nodes based on their indexes (the breadcrumbs) from the root
 //           p
 //       /       \
