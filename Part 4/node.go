@@ -49,6 +49,21 @@ func (n *Node) isLeaf() bool {
 	return len(n.childNodes) == 0
 }
 
+func (n *Node) writeNode(node *Node) *Node {
+	node, _ = n.dal.writeNode(node)
+	return node
+}
+
+func (n *Node) writeNodes(nodes ...*Node) {
+	for _, node := range nodes {
+		n.writeNode(node)
+	}
+}
+
+func (n *Node) getNode(pageNum pgnum) (*Node, error) {
+	return n.dal.getNode(pageNum)
+}
+
 // isOverPopulated checks if the node size is bigger than the size of a page.
 func (n *Node) isOverPopulated() bool {
 	return n.dal.isOverPopulated(n)
@@ -235,7 +250,7 @@ func findKeyHelper(node *Node, key []byte, exact bool, ancestorsIndexes *[]int) 
 	}
 
 	*ancestorsIndexes = append(*ancestorsIndexes, index)
-	nextChild, err := node.dal.getNode(node.childNodes[index])
+	nextChild, err := node.getNode(node.childNodes[index])
 	if err != nil {
 		return -1, nil, err
 	}
@@ -291,10 +306,10 @@ func (n *Node) split(nodeToSplit *Node, nodeToSplitIndex int) {
 	var newNode *Node
 
 	if nodeToSplit.isLeaf() {
-		newNode, _ = n.dal.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], []pgnum{}))
+		newNode = n.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], []pgnum{}))
 		nodeToSplit.items = nodeToSplit.items[:splitIndex]
 	} else {
-		newNode, _ = n.dal.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], nodeToSplit.childNodes[splitIndex+1:]))
+		newNode = n.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], nodeToSplit.childNodes[splitIndex+1:]))
 		nodeToSplit.items = nodeToSplit.items[:splitIndex]
 		nodeToSplit.childNodes = nodeToSplit.childNodes[:splitIndex+1]
 	}
@@ -306,6 +321,5 @@ func (n *Node) split(nodeToSplit *Node, nodeToSplitIndex int) {
 		n.childNodes[nodeToSplitIndex+1] = newNode.pageNum
 	}
 
-	newNode, _ = n.dal.writeNode(n)
-	newNode, _ = n.dal.writeNode(nodeToSplit)
+	n.writeNodes(n, nodeToSplit)
 }

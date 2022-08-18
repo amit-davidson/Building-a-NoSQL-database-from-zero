@@ -33,6 +33,20 @@ func (n *Node) isLeaf() bool {
 	return len(n.childNodes) == 0
 }
 
+func (n *Node) writeNode(node *Node) *Node {
+	node, _ = n.dal.writeNode(node)
+	return node
+}
+
+func (n *Node) writeNodes(nodes ...*Node) {
+	for _, node := range nodes {
+		n.writeNode(node)
+	}
+}
+
+func (n *Node) getNode(pageNum pgnum) (*Node, error) {
+	return n.dal.getNode(pageNum)
+}
 
 func (n *Node) serialize(buf []byte) []byte {
 	leftPos := 0
@@ -172,7 +186,7 @@ func findKeyHelper(node *Node, key []byte) (int, *Node ,error) {
 	}
 
 	// Else keep searching the tree
-	nextChild, err := node.dal.getNode(node.childNodes[index])
+	nextChild, err := node.getNode(node.childNodes[index])
 	if err != nil {
 		return -1, nil, err
 	}

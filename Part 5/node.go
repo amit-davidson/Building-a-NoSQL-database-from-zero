@@ -49,6 +49,21 @@ func (n *Node) isLeaf() bool {
 	return len(n.childNodes) == 0
 }
 
+func (n *Node) writeNode(node *Node) *Node {
+	node, _ = n.dal.writeNode(node)
+	return node
+}
+
+func (n *Node) writeNodes(nodes ...*Node) {
+	for _, node := range nodes {
+		n.writeNode(node)
+	}
+}
+
+func (n *Node) getNode(pageNum pgnum) (*Node, error) {
+	return n.dal.getNode(pageNum)
+}
+
 // isOverPopulated checks if the node size is bigger than the size of a page.
 func (n *Node) isOverPopulated() bool {
 	return n.dal.isOverPopulated(n)
@@ -235,7 +250,7 @@ func findKeyHelper(node *Node, key []byte, exact bool, ancestorsIndexes *[]int) 
 	}
 
 	*ancestorsIndexes = append(*ancestorsIndexes, index)
-	nextChild, err := node.dal.getNode(node.childNodes[index])
+	nextChild, err := node.getNode(node.childNodes[index])
 	if err != nil {
 		return -1, nil, err
 	}
@@ -291,10 +306,10 @@ func (n *Node) split(nodeToSplit *Node, nodeToSplitIndex int) {
 	var newNode *Node
 
 	if nodeToSplit.isLeaf() {
-		newNode, _ = n.dal.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], []pgnum{}))
+		newNode = n.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], []pgnum{}))
 		nodeToSplit.items = nodeToSplit.items[:splitIndex]
 	} else {
-		newNode, _ = n.dal.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], nodeToSplit.childNodes[splitIndex+1:]))
+		newNode = n.writeNode(n.dal.newNode(nodeToSplit.items[splitIndex+1:], nodeToSplit.childNodes[splitIndex+1:]))
 		nodeToSplit.items = nodeToSplit.items[:splitIndex]
 		nodeToSplit.childNodes = nodeToSplit.childNodes[:splitIndex+1]
 	}
@@ -306,8 +321,7 @@ func (n *Node) split(nodeToSplit *Node, nodeToSplitIndex int) {
 		n.childNodes[nodeToSplitIndex+1] = newNode.pageNum
 	}
 
-	newNode, _ = n.dal.writeNode(n)
-	newNode, _ = n.dal.writeNode(nodeToSplit)
+	n.writeNodes(n, nodeToSplit)
 }
 
 // rebalanceRemove rebalances the tree after a remove operation. This can be either by rotating to the right, to the
@@ -319,38 +333,35 @@ func (n *Node) rebalanceRemove(unbalancedNode *Node, unbalancedNodeIndex int) er
 
 	// Right rotate
 	if unbalancedNodeIndex != 0 {
-		leftNode, err := n.dal.getNode(pNode.childNodes[unbalancedNodeIndex-1])
+		leftNode, err := n.getNode(pNode.childNodes[unbalancedNodeIndex-1])
 		if err != nil {
 			return err
 		}
 		if leftNode.canSpareAnElement() {
 			rotateRight(leftNode, pNode, unbalancedNode, unbalancedNodeIndex)
-			_, _ = n.dal.writeNode(leftNode)
-			_, _ = n.dal.writeNode(pNode)
-			_, _ = n.dal.writeNode(unbalancedNode)
+			n.writeNodes(leftNode, pNode, unbalancedNode)
 			return nil
 		}
 	}
 
 	// Left Balance
 	if unbalancedNodeIndex != len(pNode.childNodes)-1 {
-		rightNode, err := n.dal.getNode(pNode.childNodes[unbalancedNodeIndex+1])
+		rightNode, err := n.getNode(pNode.childNodes[unbalancedNodeIndex+1])
 		if err != nil {
 			return err
 		}
 		if rightNode.canSpareAnElement() {
 			rotateLeft(unbalancedNode, pNode, rightNode, unbalancedNodeIndex)
-			_, _ = n.dal.writeNode(unbalancedNode)
-			_, _ = n.dal.writeNode(pNode)
-			_, _ = n.dal.writeNode(rightNode)
+			n.writeNodes(unbalancedNode, pNode, rightNode)
 			return nil
 		}
 	}
+
 	// The merge function merges a given node with its node to the right. So by default, we merge an unbalanced node
 	// with its right sibling. In the case where the unbalanced node is the leftmost, we have to replace the merge
 	// parameters, so the unbalanced node right sibling, will be merged into the unbalanced node.
 	if unbalancedNodeIndex == 0 {
-		rightNode, err := n.dal.getNode(n.childNodes[unbalancedNodeIndex+1])
+		rightNode, err := n.getNode(n.childNodes[unbalancedNodeIndex+1])
 		if err != nil {
 			return err
 		}
@@ -364,7 +375,7 @@ func (n *Node) rebalanceRemove(unbalancedNode *Node, unbalancedNodeIndex int) er
 // removeItemFromLeaf removes an item from a leaf node. It means there is no handling of child nodes.
 func (n *Node) removeItemFromLeaf(index int) {
 	n.items = append(n.items[:index], n.items[index+1:]...)
-	n.dal.writeNode(n)
+	n.writeNode(n)
 }
 
 func (n *Node) removeItemFromInternal(index int) ([]int, error) {
@@ -381,18 +392,21 @@ func (n *Node) removeItemFromInternal(index int) ([]int, error) {
 	affectedNodes = append(affectedNodes, index)
 
 	// Starting from its left child, descend to the rightmost descendant.
-	aNode, _ := n.dal.getNode(n.childNodes[index])
+	aNode, err := n.getNode(n.childNodes[index])
+	if err != nil {
+		return nil, err
+	}
+
 	for !aNode.isLeaf() {
 		traversingIndex := len(n.childNodes) - 1
-		aNode, _ = n.dal.getNode(n.childNodes[traversingIndex])
+		aNode, _ = n.getNode(n.childNodes[traversingIndex])
 		affectedNodes = append(affectedNodes, traversingIndex)
 	}
 
 	// Replace the item that should be removed with the item before inorder which we just found.
 	n.items[index] = aNode.items[len(aNode.items)-1]
 	aNode.items = aNode.items[:len(aNode.items)-1]
-	_, _ = n.dal.writeNode(n)
-	_, _ = n.dal.writeNode(aNode)
+	n.writeNodes(n, aNode)
 
 	return affectedNodes, nil
 }
@@ -463,7 +477,10 @@ func (n *Node) merge(bNode *Node, bNodeIndex int) error {
 	//	      /        |       \       ------>         /          \
 	//       a   	   b        c                     a            c
 	//     1,2         4        6,7                 1,2,3,4         6,7
-	aNode, err := n.dal.getNode(n.childNodes[bNodeIndex-1])
+	aNode, err := n.getNode(n.childNodes[bNodeIndex-1])
+	if err != nil {
+		return err
+	}
 
 	// Take the item from the parent, remove it and add it to the unbalanced node
 	pNodeItem := n.items[bNodeIndex-1]
@@ -475,15 +492,7 @@ func (n *Node) merge(bNode *Node, bNodeIndex int) error {
 	if !aNode.isLeaf() {
 		aNode.childNodes = append(aNode.childNodes, bNode.childNodes...)
 	}
-
-	_, err = n.dal.writeNode(aNode)
-	if err != nil {
-		return err
-	}
-	_, err = n.dal.writeNode(n)
-	if err != nil {
-		return err
-	}
+	n.writeNodes(aNode, n)
 	n.dal.deleteNode(bNode.pageNum)
 	return nil
 }
