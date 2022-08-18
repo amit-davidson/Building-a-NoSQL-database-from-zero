@@ -1,13 +1,18 @@
 package main
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/binary"
+)
 
 type Collection struct {
 	name []byte
 	root pgnum
+	counter uint64
 
 	// associated transaction
 	tx *tx
+
 }
 
 func newCollection(name []byte, root pgnum) *Collection {
@@ -17,11 +22,52 @@ func newCollection(name []byte, root pgnum) *Collection {
 	}
 }
 
+func newEmptyCollection() *Collection {
+	return &Collection{}
+}
+
+func (c *Collection) ID() uint64 {
+	if !c.tx.write {
+		return 0
+	}
+
+	id := c.counter
+	c.counter += 1
+	return id
+}
+
+func (c *Collection) serialize() *Item {
+	b := make([]byte, collectionSize)
+	leftPos := 0
+	binary.LittleEndian.PutUint64(b[leftPos:], uint64(c.root))
+	leftPos += pageNumSize
+	binary.LittleEndian.PutUint64(b[leftPos:], c.counter)
+	leftPos += counterSize
+	return newItem(c.name, b)
+}
+
+func (c *Collection) deserialize(item *Item) {
+	c.name = item.key
+
+	if len(item.value) != 0 {
+		leftPos := 0
+		c.root = pgnum(binary.LittleEndian.Uint64(item.value[leftPos:]))
+		leftPos += pageNumSize
+
+		c.counter = binary.LittleEndian.Uint64(item.value[leftPos:])
+		leftPos += counterSize
+	}
+}
+
 // Put adds a key to the tree. It finds the correct node and the insertion index and adds the item. When performing the
 // search, the ancestors are returned as well. This way we can iterate over them to check which nodes were modified and
 // rebalance by splitting them accordingly. If the root has too many items, then a new root of a new layer is
 // created and the created nodes from the split are added as children.
 func (c *Collection) Put(key []byte, value []byte) error {
+	if !c.tx.write {
+		return writeInsideReadTxErr
+	}
+
 	i := newItem(key, value)
 
 	// On first insertion the root node does not exist, so it should be created
@@ -29,9 +75,6 @@ func (c *Collection) Put(key []byte, value []byte) error {
 	var err error
 	if c.root == 0 {
 		root = c.tx.writeNode(c.tx.newNode([]*Item{i}, []pgnum{}))
-		if err != nil {
-			return nil
-		}
 		c.root = root.pageNum
 		return nil
 	} else {
@@ -109,6 +152,10 @@ func (c *Collection) Find(key []byte) (*Item, error) {
 // siblings don't have enough items, then merging occurs. If the root is without items after a split, then the root is
 // removed and the tree is one level shorter.
 func (c *Collection) Remove(key []byte) error {
+	if !c.tx.write {
+		return writeInsideReadTxErr
+	}
+
 	// Find the path to the node where the deletion should happen
 	rootNode, err := c.tx.getNode(c.root)
 	if err != nil {
@@ -176,10 +223,7 @@ func (c *Collection) getNodes(indexes []int) ([]*Node, error) {
 	nodes := []*Node{root}
 	child := root
 	for i := 1; i < len(indexes); i++ {
-		child, err = c.tx.getNode(child.childNodes[indexes[i]])
-		if err != nil {
-			return nil, err
-		}
+		child, _ = c.tx.getNode(child.childNodes[indexes[i]])
 		nodes = append(nodes, child)
 	}
 	return nodes, nil
