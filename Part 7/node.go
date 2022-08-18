@@ -51,8 +51,7 @@ func (n *Node) isLeaf() bool {
 }
 
 func (n *Node) writeNode(node *Node) *Node {
-	node = n.tx.writeNode(node)
-	return node
+	return n.tx.writeNode(node)
 }
 
 func (n *Node) writeNodes(nodes ...*Node) {
