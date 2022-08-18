@@ -399,7 +399,10 @@ func (n *Node) removeItemFromInternal(index int) ([]int, error) {
 
 	for !aNode.isLeaf() {
 		traversingIndex := len(n.childNodes) - 1
-		aNode, _ = n.getNode(n.childNodes[traversingIndex])
+		aNode, err = n.getNode(n.childNodes[traversingIndex])
+		if err != nil {
+			return nil, err
+		}
 		affectedNodes = append(affectedNodes, traversingIndex)
 	}
 
