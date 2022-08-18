@@ -164,14 +164,6 @@ func (d *dal) writePage(p *page) error {
 	return err
 }
 
-func (d *dal) newNode(items []*Item, childNodes []pgnum) *Node {
-	node := NewEmptyNode()
-	node.items = items
-	node.childNodes = childNodes
-	node.pageNum = d.getNextPage()
-	node.dal = d
-	return node
-}
 
 func (d *dal) getNode(pageNum pgnum) (*Node, error) {
 	p, err := d.readPage(pageNum)
