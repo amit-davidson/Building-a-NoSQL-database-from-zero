@@ -56,6 +56,7 @@ func newDal(path string) (*dal, error) {
 		}
 
 		dal.freelist = newFreelist()
+		dal.freelistPage = dal.getNextPage()
 		_, err := dal.writeFreelist()
 		if err != nil {
 			return nil, err
@@ -117,11 +118,7 @@ func (d *dal) readFreelist() (*freelist, error) {
 
 func (d *dal) writeFreelist() (*page, error) {
 	p := d.allocateEmptyPage()
-	if d.freelistPage == 0 {
-		p.num = d.getNextPage()
-	} else {
-		p.num = d.freelistPage
-	}
+	p.num = d.freelistPage
 	d.freelist.serialize(p.data)
 
 	err := d.writePage(p)
