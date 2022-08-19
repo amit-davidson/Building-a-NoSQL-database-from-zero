@@ -22,6 +22,10 @@ func newCollection(name []byte, root pgnum) *Collection {
 // rebalance by splitting them accordingly. If the root has too many items, then a new root of a new layer is
 // created and the created nodes from the split are added as children.
 func (c *Collection) Put(key []byte, value []byte) error {
+	if !c.tx.write {
+		return writeInsideReadTxErr
+	}
+
 	i := newItem(key, value)
 
 	// On first insertion the root node does not exist, so it should be created
@@ -109,6 +113,10 @@ func (c *Collection) Find(key []byte) (*Item, error) {
 // siblings don't have enough items, then merging occurs. If the root is without items after a split, then the root is
 // removed and the tree is one level shorter.
 func (c *Collection) Remove(key []byte) error {
+	if !c.tx.write {
+		return writeInsideReadTxErr
+	}
+
 	// Find the path to the node where the deletion should happen
 	rootNode, err := c.tx.getNode(c.root)
 	if err != nil {
